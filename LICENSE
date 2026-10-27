@@ -1,21 +1,502 @@
-MIT License
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3D Virtual Museum (P2P)</title>
+    <!-- Three.js & PeerJS CDNs -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
+       body { overflow: hidden; background: #000; color: white; touch-action: none; }
+        .ui-panel {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(20, 20, 30, 0.95); padding: 2.5rem; border-radius: 16px;
+            text-align: center; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(12px);
+            z-index: 100; box-shadow: 0 10px 40px rgba(0,0,0,0.5); width: 90%; max-width: 400px;
+        }
+        .ui-panel h2 { margin-bottom: 5px; }
+        .ui-panel input {
+            padding: 12px; margin: 15px 0; width: 100%; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(255,255,255,0.05); color: white; font-size: 1rem; outline: none; text-align: center;
+        }
+        .btn-group { display: flex; gap: 10px; margin-top: 15px; }
+        .ui-panel button {
+            padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-size: 1rem; 
+            font-weight: 600; transition: 0.2s; flex: 1; color: white;
+        }
+        #host-btn { background: #2ecc71; }
+        #host-btn:hover { background: #27ae60; }
+        #join-btn { background: #4a90e2; }
+        #join-btn:hover { background: #357abd; }
+        
+        #game-ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        #room-display { 
+            position: absolute; top: 15px; left: 15px; background: rgba(0,0,0,0.6); 
+            padding: 8px 16px; border-radius: 20px; pointer-events: auto; font-weight: 600;
+        }
+        #interaction-prompt {
+            position: absolute; top: 65%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.8); padding: 12px 24px; border-radius: 30px;
+            font-weight: 600; border: 1px solid #4a90e2; transition: opacity 0.3s;
+        }
+        #interaction-prompt.hidden { opacity: 0; pointer-events: none; }
+        #controls-menu {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 15px; pointer-events: auto; flex-wrap: wrap; justify-content: center;
+        }
+        .menu-section { display: flex; gap: 8px; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 16px; }
+        .emote-btn, .emoji-btn {
+            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15);
+            color: white; padding: 10px 14px; border-radius: 10px; cursor: pointer; font-size: 1.3rem;
+            transition: 0.2s; min-width: 50px; display: flex; align-items: center; justify-content: center;
+        }
+        .emote-btn:hover, .emoji-btn:hover { background: rgba(255,255,255,0.25); transform: scale(1.1); }
+        #mobile-controls {
+            position: absolute; bottom: 20px; width: 100%; display: none; 
+            pointer-events: auto; padding: 0 30px; justify-content: space-between; align-items: flex-end;
+        }
+        #joystick-zone { 
+            width: 120px; height: 120px; background: rgba(255,255,255,0.1); border-radius: 50%; 
+            border: 2px solid rgba(255,255,255,0.3); position: relative;
+        }
+        #joystick-knob {
+            width: 50px; height: 50px; background: rgba(255,255,255,0.8); border-radius: 50%;
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        }
+        #sit-stand-btn { 
+            padding: 15px 25px; background: #4a90e2; border: none; border-radius: 30px; 
+            color: white; font-weight: bold; font-size: 1rem;
+        }
+        .floating-emoji {
+            position: absolute; font-size: 2.5rem; animation: floatUp 2.5s forwards; pointer-events: none; 
+            text-shadow: 0 0 10px rgba(0,0,0,0.8); z-index: 50;
+        }
+        @keyframes floatUp {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+            15% { transform: translate(-50%, -80%) scale(1.3); opacity: 1; }
+            100% { transform: translate(-50%, -200%) scale(1); opacity: 0; }
+        }
+        .floating-heart {
+            position: absolute; font-size: 3rem; animation: pulseFloat 1.5s infinite forwards; pointer-events: none; 
+            text-shadow: 0 0 20px #ff0055, 0 0 40px #ff0055; z-index: 50;
+        }
+        @keyframes pulseFloat {
+            0% { transform: translate(-50%, -50%) scale(1); opacity: 0.8; }
+            50% { transform: translate(-50%, -80%) scale(1.4); opacity: 1; }
+            100% { transform: translate(-50%, -50%) scale(1); opacity: 0.8; }
+        }
+    </style>
+</head>
+<body>
+    <div id="room-ui" class="ui-panel">
+        <h2>🏛️ Virtual Museum</h2>
+        <p style="margin-bottom: 15px; color: #aaa; font-size: 0.9rem;">No server needed! Direct P2P connection.</p>
+        <input type="text" id="room-code" placeholder="Room Code (e.g., museum-1)" value="museum-1">
+        <div class="btn-group">
+            <button id="host-btn">Host Room</button>
+            <button id="join-btn">Join Room</button>
+        </div>
+        <p id="status-msg" style="margin-top: 15px; color: #f1c40f; font-size: 0.9rem; min-height: 20px;"></p>
+    </div>
 
-Copyright (c) 2026 Zohaibaloch
+    <div id="game-ui" style="display: none;">
+        <div id="room-display">Room: <span id="current-room"></span></div>
+        <div id="interaction-prompt" class="hidden"><span>Press [E] or Tap 'Sit' to watch</span></div>
+        <div id="controls-menu">
+            <div class="menu-section">
+                <button class="emote-btn" data-emote="heart">❤️</button>
+                <button class="emote-btn" data-emote="dance">💃</button>
+                <button class="emote-btn" data-emote="kiss">😘</button>
+                <button class="emote-btn" data-emote="wave">👋</button>
+            </div>
+            <div class="menu-section">
+                <button class="emoji-btn" data-emoji="😂">😂</button>
+                <button class="emoji-btn" data-emoji="😍">😍</button>
+                <button class="emoji-btn" data-emoji="🔥">🔥</button>
+                <button class="emoji-btn" data-emoji="👏">👏</button>
+            </div>
+        </div>
+        <div id="mobile-controls">
+            <div id="joystick-zone"><div id="joystick-knob"></div></div>
+            <button id="sit-stand-btn">Sit / Stand</button>
+        </div>
+    </div>
+    <div id="emoji-container"></div>
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+    <script>
+        let peer = null, conn = null, isHost = false;
+        let myPlayerId = null, remotePlayerId = null;
+        let isGameInitialized = false;
+        const statusMsg = document.getElementById('status-msg');
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+        // --- P2P CONNECTION LOGIC ---
+        document.getElementById('host-btn').addEventListener('click', () => {
+            const roomId = document.getElementById('room-code').value.trim();
+            if (!roomId) return alert("Please enter a room code");
+            statusMsg.textContent = "Creating room...";
+            isHost = true;
+            myPlayerId = 'host-' + roomId;
+            
+            peer = new Peer(myPlayerId, { debug: 1 });
+            peer.on('open', () => {
+                statusMsg.textContent = "Room created! Waiting for player...";
+                startGame();
+            });
+            peer.on('connection', (c) => {
+                if (conn) { // Max 2 players
+                    c.on('open', () => { c.send({ type: 'roomFull' }); setTimeout(() => c.close(), 100); });
+                    return;
+                }
+                conn = c;
+                setupConnection();
+            });
+            peer.on('error', (err) => {
+                if (err.type === 'unavailable-id') statusMsg.textContent = "Room already exists. Try joining or use a different code.";
+                else statusMsg.textContent = "Error: " + err.type;
+            });
+        });
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+        document.getElementById('join-btn').addEventListener('click', () => {
+            const roomId = document.getElementById('room-code').value.trim();
+            if (!roomId) return alert("Please enter a room code");
+            statusMsg.textContent = "Connecting to room...";
+            isHost = false;
+            
+            peer = new Peer({ debug: 1 });
+            peer.on('open', (id) => {
+                myPlayerId = id;
+                conn = peer.connect(roomId, { reliable: true });
+                setupConnection();
+            });
+            peer.on('error', (err) => {
+                if (err.type === 'peer-unavailable') statusMsg.textContent = "Room not found. Check code or ask host to stay online.";
+                else statusMsg.textContent = "Error: " + err.type;
+            });
+        });
+
+        function setupConnection() {
+            conn.on('open', () => {
+                if (isHost) {
+                    conn.send({ type: 'initPlayers', players: [{ id: myPlayerId, x: 0, y: 0, z: 5, rotation: 0, animation: 'idle', isSitting: false }] });
+                } else {
+                    conn.send({ type: 'playerJoined', player: { id: myPlayerId, x: 0, y: 0, z: 5, rotation: 0, animation: 'idle', isSitting: false } });
+                }
+                startGame();
+            });
+            conn.on('data', handleData);
+            conn.on('close', () => {
+                if (isHost && remotePlayerId) {
+                    removePlayer(remotePlayerId);
+                    remotePlayerId = null;
+                    alert("Player disconnected. Waiting for a new player...");
+                } else if (!isHost) {
+                    alert("Host disconnected!");
+                    location.reload();
+                }
+            });
+        }
+
+        function handleData(data) {
+            switch(data.type) {
+                case 'roomFull': alert("Room is full (Max 2 players)."); location.reload(); break;
+                case 'initPlayers':
+                    data.players.forEach(p => {
+                        if (p.id !== myPlayerId) { createPlayer(p.id, p.x, p.y, p.z, false); remotePlayerId = p.id; }
+                    });
+                    break;
+                case 'playerJoined':
+                    remotePlayerId = data.player.id;
+                    createPlayer(data.player.id, data.player.x, data.player.y, data.player.z, false);
+                    break;
+                case 'playerUpdate': updatePlayer(data.player); break;
+                case 'triggerEmote': playRemoteEmote(data.playerId, data.emote); break;
+                case 'triggerEmoji': showFloatingEmoji(data.playerId, data.emoji); break;
+            }
+        }
+
+        function send(data) { if (conn && conn.open) conn.send(data); }
+
+        // --- GAME LOGIC ---
+        const players = new Map();
+        const keys = { w: false, a: false, s: false, d: false };
+        let isSitting = false, canInteract = false;
+        let scene, camera, renderer, clock, localPlayerMesh, raycaster;
+        let interactableBenches = [];
+
+        function startGame() {
+            if (isGameInitialized) return;
+            isGameInitialized = true;
+            document.getElementById('room-ui').style.display = 'none';
+            document.getElementById('game-ui').style.display = 'block';
+            document.getElementById('current-room').textContent = document.getElementById('room-code').value.trim();
+            if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+                document.getElementById('mobile-controls').style.display = 'flex';
+            }
+            initThreeJS();
+            createPlayer(myPlayerId, 0, 0, 5, true);
+        }
+
+        function initThreeJS() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xf0f0f0);
+            scene.fog = new THREE.Fog(0xf0f0f0, 10, 40);
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(0, 3, 8);
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.body.appendChild(renderer.domElement);
+            clock = new THREE.Clock();
+            raycaster = new THREE.Raycaster();
+            setupLighting();
+            buildMuseum();
+            setupInputs();
+            animate();
+        }
+
+        function setupLighting() {
+            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(5, 10, 5);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            scene.add(dirLight);
+        }
+
+        function buildMuseum() {
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(20, 30), new THREE.MeshStandardMaterial({ color: 0xe0e0e0, roughness: 0.1 }));
+            floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+
+            const backWall = new THREE.Mesh(new THREE.BoxGeometry(20, 6, 0.5), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+            backWall.position.set(0, 3, -10); backWall.receiveShadow = true; scene.add(backWall);
+
+            [{ x: -6, z: -9.7 }, { x: 0, z: -9.7 }, { x: 6, z: -9.7 }].forEach(pos => {
+                const frame = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 0.2), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+                frame.position.set(pos.x, 3, pos.z); scene.add(frame);
+                const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 256;
+                const ctx = canvas.getContext('2d'); ctx.fillStyle = '#2c3e50'; ctx.fillRect(0,0,256,256);
+                ctx.fillStyle = '#ecf0f1'; ctx.font = 'bold 24px Arial'; ctx.textAlign = 'center';
+                ctx.fillText('Digital Art', 128, 138);
+                const art = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 1.8), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas) }));
+                art.position.set(pos.x, 3, pos.z - 0.16); scene.add(art);
+            });
+
+            const video = document.createElement('video');
+            video.src = 'https://files.catbox.moe/vxrz4l.mp4';
+            video.crossOrigin = 'anonymous'; video.loop = true; video.muted = true; video.playsInline = true;
+            video.play().catch(() => {
+                const playVid = () => { video.play(); document.body.removeEventListener('click', playVid); document.body.removeEventListener('touchstart', playVid); };
+                document.body.addEventListener('click', playVid, { once: true });
+                document.body.addEventListener('touchstart', playVid, { once: true });
+            });
+            const screenMesh = new THREE.Mesh(new THREE.PlaneGeometry(8, 4.5), new THREE.MeshBasicMaterial({ map: new THREE.VideoTexture(video) }));
+            screenMesh.position.set(0, 3.5, -9.6); scene.add(screenMesh);
+
+            const bench = new THREE.Mesh(new THREE.BoxGeometry(4, 0.5, 1), new THREE.MeshStandardMaterial({ color: 0x5D4037 }));
+            bench.position.set(0, 0.25, -4); bench.castShadow = true; bench.receiveShadow = true;
+            scene.add(bench); interactableBenches.push(bench);
+        }
+
+        function createPlayer(id, x, y, z, isLocal) {
+            const group = new THREE.Group(); group.position.set(x, y, z);
+            const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.4, 1, 4, 8), new THREE.MeshStandardMaterial({ color: isLocal ? 0x4a90e2 : 0xe74c3c }));
+            body.position.y = 0.9; body.castShadow = true; group.add(body);
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 16), new THREE.MeshStandardMaterial({ color: 0xffccaa }));
+            head.position.y = 1.7; head.castShadow = true; group.add(head);
+            scene.add(group);
+            players.set(id, { mesh: group, isLocal, targetPos: new THREE.Vector3(x, y, z), emote: null, emojiElement: null });
+            if (isLocal) localPlayerMesh = group;
+        }
+
+        function updatePlayer(data) {
+            const p = players.get(data.id);
+            if (p) {
+                p.targetPos.set(data.x, data.y, data.z);
+                p.mesh.rotation.y = data.rotation;
+                if (data.isSitting) p.mesh.position.copy(p.targetPos);
+            }
+        }
+
+        function removePlayer(id) {
+            const p = players.get(id);
+            if (p) { scene.remove(p.mesh); if (p.emojiElement) p.emojiElement.remove(); players.delete(id); }
+        }
+
+        function setupInputs() {
+            window.addEventListener('keydown', (e) => {
+                const key = e.key.toLowerCase();
+                if (keys.hasOwnProperty(key)) keys[key] = true;
+                if (key === 'e' && canInteract) toggleSit();
+            });
+            window.addEventListener('keyup', (e) => {
+                const key = e.key.toLowerCase();
+                if (keys.hasOwnProperty(key)) keys[key] = false;
+            });
+
+            document.querySelectorAll('.emote-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    send({ type: 'triggerEmote', playerId: myPlayerId, emote: btn.dataset.emote });
+                    playLocalEmote(btn.dataset.emote);
+                });
+            });
+            document.querySelectorAll('.emoji-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    send({ type: 'triggerEmoji', playerId: myPlayerId, emoji: btn.dataset.emoji });
+                    showFloatingEmoji(myPlayerId, btn.dataset.emoji);
+                });
+            });
+            document.getElementById('sit-stand-btn').addEventListener('click', () => { if (canInteract) toggleSit(); });
+
+            const joystickZone = document.getElementById('joystick-zone');
+            const joystickKnob = document.getElementById('joystick-knob');
+            let touchStartX = 0, touchStartY = 0, isTouching = false;
+
+            joystickZone.addEventListener('touchstart', (e) => {
+                isTouching = true; const touch = e.touches[0];
+                touchStartX = touch.clientX; touchStartY = touch.clientY;
+                joystickKnob.style.transition = 'none';
+            }, { passive: false });
+
+            joystickZone.addEventListener('touchmove', (e) => {
+                if (!isTouching) return; e.preventDefault();
+                const touch = e.touches[0];
+                const deltaX = touch.clientX - touchStartX, deltaY = touch.clientY - touchStartY;
+                const distance = Math.min(Math.sqrt(deltaX**2 + deltaY**2), 35);
+                const angle = Math.atan2(deltaY, deltaX);
+                joystickKnob.style.transform = `translate(calc(-50% + ${Math.cos(angle) * distance}px), calc(-50% + ${Math.sin(angle) * distance}px))`;
+                keys.w = deltaY < -15; keys.s = deltaY > 15; keys.a = deltaX < -15; keys.d = deltaX > 15;
+            }, { passive: false });
+
+            const endTouch = () => {
+                isTouching = false; keys.w = keys.a = keys.s = keys.d = false;
+                joystickKnob.style.transition = 'transform 0.2s';
+                joystickKnob.style.transform = 'translate(-50%, -50%)';
+            };
+            joystickZone.addEventListener('touchend', endTouch);
+            joystickZone.addEventListener('touchcancel', endTouch);
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        function toggleSit() {
+            isSitting = !isSitting;
+            const p = players.get(myPlayerId);
+            if (isSitting) {
+                p.mesh.position.set(0, 0.5, -3.5); p.mesh.rotation.y = Math.PI;
+                send({ type: 'playerUpdate', player: { id: myPlayerId, x: 0, y: 0.5, z: -3.5, rotation: Math.PI, isSitting: true, animation: 'sitting' } });
+            } else {
+                p.mesh.position.set(0, 0, -2.5); p.mesh.rotation.y = 0;
+                send({ type: 'playerUpdate', player: { id: myPlayerId, x: 0, y: 0, z: -2.5, rotation: 0, isSitting: false, animation: 'idle' } });
+            }
+        }
+
+        function playLocalEmote(emote) {
+            const p = players.get(myPlayerId);
+            if (emote === 'heart') { p.mesh.scale.set(1.2, 1.2, 1.2); setTimeout(() => p.mesh.scale.set(1, 1, 1), 1000); }
+            else if (emote === 'dance') {
+                let spins = 0; const interval = setInterval(() => { p.mesh.rotation.y += 0.4; spins++; if (spins > 15) clearInterval(interval); }, 50);
+            } else if (emote === 'kiss') {
+                showFloatingEmoji(myPlayerId, '😘'); p.mesh.position.y += 0.2; setTimeout(() => p.mesh.position.y -= 0.2, 300);
+            } else if (emote === 'wave') {
+                let waves = 0; const interval = setInterval(() => { p.mesh.rotation.z = waves % 2 === 0 ? 0.2 : -0.2; waves++; if (waves > 5) { p.mesh.rotation.z = 0; clearInterval(interval); } }, 150);
+            }
+        }
+
+        function playRemoteEmote(playerId, emote) {
+            const p = players.get(playerId); if (!p) return;
+            p.emote = emote;
+            if (emote === 'heart') showFloatingHeart(playerId);
+            else if (emote === 'dance') {
+                let spins = 0; const interval = setInterval(() => {
+                    if (!players.has(playerId)) return clearInterval(interval);
+                    p.mesh.rotation.y += 0.4; spins++; if (spins > 15) clearInterval(interval);
+                }, 50);
+            } else if (emote === 'kiss') {
+                showFloatingEmoji(playerId, '😘'); p.mesh.position.y += 0.2; setTimeout(() => { if(players.has(playerId)) p.mesh.position.y -= 0.2; }, 300);
+            } else if (emote === 'wave') {
+                let waves = 0; const interval = setInterval(() => {
+                    if (!players.has(playerId)) return clearInterval(interval);
+                    p.mesh.rotation.z = waves % 2 === 0 ? 0.2 : -0.2; waves++; if (waves > 5) { p.mesh.rotation.z = 0; clearInterval(interval); }
+                }, 150);
+            }
+            setTimeout(() => {
+                if (players.has(playerId)) {
+                    players.get(playerId).emote = null; p.mesh.scale.set(1, 1, 1);
+                    if (p.emojiElement && p.emojiElement.classList.contains('floating-heart')) { p.emojiElement.remove(); p.emojiElement = null; }
+                }
+            }, 3000);
+        }
+
+        function showFloatingEmoji(playerId, emoji) {
+            const p = players.get(playerId); if (!p) return;
+            if (p.emojiElement) p.emojiElement.remove();
+            const el = document.createElement('div'); el.className = 'floating-emoji'; el.textContent = emoji;
+            document.getElementById('emoji-container').appendChild(el); p.emojiElement = el;
+            setTimeout(() => { if (p.emojiElement === el) { el.remove(); p.emojiElement = null; } }, 2500);
+        }
+
+        function showFloatingHeart(playerId) {
+            const p = players.get(playerId); if (!p) return;
+            if (p.emojiElement) p.emojiElement.remove();
+            const el = document.createElement('div'); el.className = 'floating-heart'; el.textContent = '❤️';
+            document.getElementById('emoji-container').appendChild(el); p.emojiElement = el;
+        }
+
+        let lastUpdate = 0;
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = Math.min(clock.getDelta(), 0.1);
+            if (localPlayerMesh && !isSitting) {
+                const speed = 5 * delta; let moved = false; const pos = localPlayerMesh.position;
+                if (keys.w) { pos.z -= speed; moved = true; }
+                if (keys.s) { pos.z += speed; moved = true; }
+                if (keys.a) { pos.x -= speed; moved = true; localPlayerMesh.rotation.y = Math.PI / 2; }
+                if (keys.d) { pos.x += speed; moved = true; localPlayerMesh.rotation.y = -Math.PI / 2; }
+                
+                if (moved) {
+                    camera.position.x += (pos.x - camera.position.x) * 0.1;
+                    camera.position.z += (pos.z + 8 - camera.position.z) * 0.1;
+                    camera.lookAt(pos.x, 1, pos.z);
+                    const now = Date.now();
+                    if (now - lastUpdate > 50) { // Throttle to 20 updates/sec for optimization
+                        send({ type: 'playerUpdate', player: { id: myPlayerId, x: pos.x, y: pos.y, z: pos.z, rotation: localPlayerMesh.rotation.y, animation: 'walking', isSitting: false } });
+                        lastUpdate = now;
+                    }
+                }
+            }
+            players.forEach((p) => {
+                if (!p.isLocal && !p.emote) p.mesh.position.lerp(p.targetPos, 0.15);
+                if (p.emojiElement) {
+                    const vector = new THREE.Vector3(0, 2.5, 0);
+                    vector.applyMatrix4(p.mesh.matrixWorld); vector.project(camera);
+                    if (vector.z < 1) {
+                        p.emojiElement.style.left = `${(vector.x * 0.5 + 0.5) * window.innerWidth}px`;
+                        p.emojiElement.style.top = `${(-(vector.y * 0.5) + 0.5) * window.innerHeight}px`;
+                        p.emojiElement.style.display = 'block';
+                    } else { p.emojiElement.style.display = 'none'; }
+                }
+            });
+            if (!isSitting) {
+                raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+                const intersects = raycaster.intersectObjects(interactableBenches);
+                if (intersects.length > 0 && intersects[0].distance < 4) {
+                    canInteract = true; document.getElementById('interaction-prompt').classList.remove('hidden');
+                } else {
+                    canInteract = false; document.getElementById('interaction-prompt').classList.add('hidden');
+                }
+            }
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
+
